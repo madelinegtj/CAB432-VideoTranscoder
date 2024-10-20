@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Converter App</title>
+    <link 
+        rel="stylesheet"
+        href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+    /> <%# Contain predefined styles; determined by div class %>
+</head>
+<body>
+    <div class="container">
+        <br/>
+        <h1 class="text-center" style="margin-top:20px;">
+            Online Video Converter
+        </h1>
+        <br/>
+        <form id="form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="video">Select Video:</label>
+                <input 
+                    class="form-control"
+                    type="file" 
+                    name="files" 
+                    id="upload-input" 
+                    accept="video/" 
+                    required/>
+            </div>
+            <div id="progressContainer" style="display:none;">
+                <progress id="uploadProgress" role="progressbar" value="0" max="100" style="width: 100%;"></progress>
+                <span id="progressText" style="align-self:right;">0%</span>
+            </div>
+            <div class="form-group">
+                <label for="format">Select Format:</label>
+                <select class="form-control" id="format">
+                    <option value="mp4" selected>mp4</option>
+                    <option value="avi">avi</option>
+                    <option value="flv">flv</option>
+                    <option value="gif">gif</option>
+                    <option value="m4v">m4v</option>
+                    <option value="mov">mov</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <button id="button" class="button" type="submit">
+                    Upload & Convert
+                </button>
+            </div>
+            <div id="metadata-section">
+                <label>Video Metadata:</label>
+                <ul id="metadata-list" 
+                    style="list-style-type:none; padding-left:0; font-size:11px;"
+                ></ul> <!-- This will be dynamically populated with metadata -->
+            </div>
+            <div class="form-group">
+                <button id="download-button" class="button">
+                    Download Video File
+                </button>
+            </div>
+        </form>
+        <a href="/video">See All Uploaded Videos</a>
+        <br/>
+    </div>
+</body>
+<script src="https://cdn.jsdelivr.net/npm/browser-image-converter@0.1.1/dist/index.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script>
+    // <----- Event Listener when the form is submitted ----->
+    let convertData; 
+
+    $("#metadata-section").hide();
+    $("#download-button").hide();
+
+    document.getElementById('form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        
+        const formData = new FormData(event.target);
+        
+        // Show progress bar
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('uploadProgress');
+        const progressText = document.getElementById('progressText');
+        progressContainer.style.display = 'block';
+
+        // -- UPLOAD VIDEO --
+        // Use XMLHttpRequest for tracking upload progress
+        const xhr = new XMLHttpRequest();
+
+        // Update progress bar during upload
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressBar.value = percentComplete;
+                progressText.textContent = `${Math.round(percentComplete)}%`;
+            }
+        });
+
+        // Open the request and send the form data
+        xhr.open('POST', '/uploadvideo', true);
+
+        // Handle success/failure
+        xhr.onload = function () {
+            const result = JSON.parse(xhr.responseText);
+            console.log("Upload Response:", result);
+            alert(result.message || 'Upload failed!');
+
+            // If successful
+            if(xhr.status === 200){
+                // prepare the data for conversion
+                convertData = {
+                    format: $("#format").val(), 
+                    codec: 'h264', 
+                    videoData: {
+                        filepath: result.metadata.filepath,
+                        mimetype: result.metadata.mimetype, 
+                        filename: result.metadata.filename,
+                        codec: result.metadata.codec 
+                    }
+                };
+                
+                // -- CONVERT VIDEO --
+                // Send the request to convert the video
+                const convertXhr = new XMLHttpRequest();
+                convertXhr.open('POST', '/convertvideo', true);
+                convertXhr.setRequestHeader('Content-Type', 'application/json'); // Set appropriate header
+                convertXhr.send(JSON.stringify(convertData)); // Send the convert data as JSON
+
+                $("#button").hide();
+                $("#download-button").show();
+
+                // Reset progress bar
+                progressBar.value = 0;
+                progressText.textContent = '0%';
+                progressContainer.style.display = 'none';
+
+                // Check if metadata is available and call displayMetadata function
+                if (result.metadata) {
+                    displayMetadata(result.metadata); // Call the function to display metadata
+                }
+
+                // -- DOWNLOAD VIDEO --
+                //const downloadXhr = new XMLHttpRequest();
+                //downloadXhr.open('POST', '/convertvideo', true);
+                //downloadXhr.setRequestHeader('Content-Type', 'application/json'); // Set appropriate header
+                //downloadXhr.send(JSON.stringify(convertData)); // Send the convert data as JSON
+            }
+
+            
+
+        };
+
+        // Handle error
+        xhr.onerror = function () {
+            alert('Upload failed! Please try again.');
+            progressBar.value = 0;
+            progressText.textContent = '0%';
+            progressContainer.style.display = 'none';
+        };
+
+        // Send the form data for the upload
+        xhr.send(formData);
+        console.log("formData sent");
+    });
+
+    document.getElementById('download-button').addEventListener('click', function(event) {
+        event.preventDefault();  
+        // Make a POST request to /downloadvideo
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/downloadvideo', true);
+        xhr.responseType = 'blob'; // Expecting a blob response (the video file)
+        xhr.onload = function () {
+            if (xhr.status === 200) {
+                // Create a link element to download the file
+                const blob = xhr.response;
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = convertData.videoData.filename.split(".")[0] + "." + convertData.format;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl); // Clean up the URL object
+
+                // Reset the form after the video has been downloaded
+                document.getElementById('form').reset();
+                $("#metadata-section").hide();
+                $("#download-button").hide();
+                $("#button").show();
+            } else {
+                console.error('Failed to download video:', xhr.statusText);
+                alert('Failed to download video');
+            }
+        };
+        xhr.onerror = function () {
+            console.error('Error during the download request');
+            alert('Error during the download');
+        };
+
+        xhr.send();  // No need to send data since the server already knows the file
+    });
+
+    function displayMetadata(metadata) {
+        // Select the metadata list in the HTML
+        var metadataList = $("#metadata-list");
+        metadataList.empty(); // Clear any previous metadata
+
+        // Check if metadata has streams (video information)
+        if (metadata) {
+            $("#metadata-section").show();  // Show when metadata is available
+            
+            //metadataList.append("<li><strong>Title:</strong> " + metadata.title + "</li>");
+            metadataList.append("<li><strong>Filename:</strong> " + metadata.filename.split(".")[0] + "." + $("#format").val() + "</li>");
+            metadataList.append("<li><strong>Filepath:</strong> " + metadata.filepath.split(".")[0] + "." + $("#format").val() + "</li>");
+            //metadataList.append("<li><strong>MIME Type:</strong> " + metadata.mimetype + "</li>");
+            metadataList.append("<li><strong>Size:</strong> " + (metadata.size / (1024 * 1024)).toFixed(2) + " MB</li>");
+            metadataList.append("<li><strong>Duration:</strong> " + Math.round(metadata.duration) + " seconds</li>");
+            //metadataList.append("<li><strong>Author:</strong> " + metadata.author + "</li>");
+            metadataList.append("<li><strong>Codec:</strong> " + metadata.codec + "</li>");
+            // add thumbnail
+            if (metadata.thumbnail) {
+                metadataList.append("<img src='" + metadata.thumbnail + "' alt='Thumbnail' width='426' height='240'/></li> ");
+            }
+
+        } else {
+            metadataList.append("<li>No video metadata found</li>");
+        }
+    }
+    
+    // <----- APPLY THE LOGIC FOR UPLOADING AND CONVERTING ----->
+    /*var files;   // will be used to store the user input, which is the submitted video file
+    $("#form").submit((err)=>{
+        err.preventDefault();
+
+        $(".progress-bar").text("0%");
+        $("#button").text("Uploading File");
+        $("#button").prop("disabled", true);    // when uploading file, the button is disabled
+        $(".progress-bar").width("0%");
+        convertFile();      // see convertFile function below
+    });     // "#form": targeting obj element with id:"form"
+            // .submit() is one of the JQuery event handlers
+
+    $("#upload-input").on("change", function (){
+        files = $(this).get(0).files;   // takes the user input, which is the submitted video file
+        var fileExtension = [
+            "mp4",
+            "avi",
+            "gif",
+            "flv",
+            "m4v",
+            "mkv",
+            "mov",
+            "wmv",
+        ];
+
+        // Checks if the uploaded file has correct format
+        if(
+            $.inArray(
+                $(this).val().split(".").pop().toLowerCase(),
+                fileExtension
+            ) === -1
+        ){
+            $(this).val("");
+            alert("Please upload a video format file");
+        }
+    });
+    function convertFile(){
+        if (files.length > 0){
+            // Create a FormData object which will be sent as the data payload in the AJAX request
+            var formData = new FormData();
+            // Loop through all the uploaded files and add them to the formData object
+            // in this case, we are only expecting one video at once
+            for (var i=0; i < files.length; i++){
+                var file = files[i];
+                formData.append("file", file, file.name);
+            }
+            console.log(formData);
+            //var formData2 = new FormData();
+            $.ajax({
+                url: "/uploadvideo",
+                type: "POST",
+                data: formData,
+                processData: false,
+                contentType: false,
+                xhr: function() {
+                    var xhr = new window.XMLHttpRequest();
+                    // Listen to the upload progress event
+                    xhr.upload.addEventListener(
+                        "progress", function(event) {
+                            if (event.lengthComputable) {
+                                var percentComplete = event.loaded / event.total * 100;
+                                percentComplete = Math.round(percentComplete);
+                                // Update the Bootstrap progress bar with the percentage
+                                $(".progress-bar").text(percentComplete + "%");
+                                $(".progress-bar").width(percentComplete + "%");
+
+                                // When complete, change the text
+                                if (percentComplete === 100) {
+                                    $(".progress-bar").text("Done");
+                                }
+                            }
+                        }, false
+                    );
+                    return xhr;
+                },
+                // if the POST request is successful, return the data a.k.a the path of the uploaded file to us
+                success: function (data){
+                    console.log(data);
+                    var data2 = { path: data.path, format: $("#format").val() };
+                    console.log("Upload Successful!" + data.path);
+                    console.log("Metadata:", data.metadata); 
+                    displayMetadata(data.metadata);
+
+                    $("#button").text("File Uploaded Now Being Processed");
+                    //$("#button").prop("disabled", true);
+                    //formData2.append("path", data.path);
+                    $.ajax({
+                        url: "/convertvideo",
+                        type: "POST",
+                        data: JSON.stringify(data2),
+                        contentType: "application/json",
+                        dataType: "json",
+                        success: function (data){
+                            window.open("/download?path=" + data.path);
+                            $("#button").text("Download File");
+                            $("#button").prop("disabled", false);
+                            location.reload();
+                        },
+                    });
+                },
+            });  // end of .ajax
+        }
+    }  // end of convertFile() function*/
+</script> 
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #01346b;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+    }
+
+    .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background-color: #fff;
+        width: 600px;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 5px 10px rgba(0, 0, 0, 0.1);
+        margin: 20px;
+        margin-top: 10px;
+    }
+
+    .form {
+        display: flex;
+        flex-direction: row;
+        width: 500px;
+        margin-bottom: 10px;
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+    }
+
+    .form label {
+        display: block;
+        margin-bottom: 5px;
+    }
+
+    .button {
+        width: 100%;
+        padding: 10px;
+        background-color: #007bff;
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+
+    .button:hover {
+        background-color: #0056b3;
+    }
+
+    #metadata-section {
+        margin-top: 20px;
+    }
+
+    #metadata-list li {
+        margin: 2px 0;
+    }
+</style>
+</html>
+
+<%# Basic webpage; Using a template from ejs (the template engine; "Embedded JS template") by typing '!' %>
